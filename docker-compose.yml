@@ -1,0 +1,85 @@
+version: '3.8'
+services:
+
+  service-registry:
+    container_name: core-service-registry
+    image: serfanrud/${RELEASE_REGISTRY}
+    ports:
+      - 8080:8080
+    restart: always
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  gateway:
+    container_name: core-gateway-service
+    image: serfanrud/${RELEASE_GATEWAY}
+    hostname: core-gateway-service
+    ports:
+      - 8080:8080
+    depends_on:
+      - core-service-registry
+    restart: always
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  db:
+    image: ${POSTGRES_VERSION}
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - '5432:5432'
+    volumes:
+      - ./db:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    #    env_file:
+    #      - .env
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  redis:
+    container_name: ${REDIS_CONTAINER_NAME}
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    image: ${REDIS_VERSION}
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  redis-slave:
+    image: ${REDIS_VERSION}
+    container_name: slave
+    ports:
+      - "6380:6379"
+    command: redis-server --slaveof ${REDIS_CONTAINER_NAME} 6379
+    depends_on:
+      - redis
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  core-parameter-service:
+    container_name: core-parameter-service
+    image: serfanrud/${RELEASE_PARAMETER}
+    hostname: core-parameter-service
+    environment:
+      DB_HOST: ${DB_HOST_PARAM}
+      DB_PORT: ${DB_PORT_PARAM}
+      DB_USERNAME: ${DB_USER_PARAM}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME_PARAM}
+      DB_DDL: update
+      PORT: 8080
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - 8080:8080
+    depends_on:
+      - db
+      - redis
+      - redis-slave
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
