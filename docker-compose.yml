@@ -3,9 +3,10 @@ services:
 
   service-registry:
     container_name: core-service-registry
+    hostname: service-registry
     image: serfanrud/${RELEASE_REGISTRY}
     ports:
-      - 8080:8080
+      - 8080:8082
     restart: always
     networks:
       - ${GLOBAL_NETWORK:-wallet}
@@ -15,7 +16,7 @@ services:
     image: serfanrud/${RELEASE_GATEWAY}
     hostname: core-gateway-service
     ports:
-      - 8080:8080
+      - 8080:8083
     depends_on:
       - core-service-registry
     restart: always
@@ -24,6 +25,7 @@ services:
 
   db:
     image: ${POSTGRES_VERSION}
+    hostname: db
     restart: always
     environment:
       - POSTGRES_USER=${POSTGRES_USERNAME}
@@ -40,6 +42,7 @@ services:
 
   redis:
     container_name: ${REDIS_CONTAINER_NAME}
+    hostname: redis
     environment:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
@@ -62,6 +65,75 @@ services:
     networks:
       - ${GLOBAL_NETWORK:-wallet}
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:${KAFKA_VERSION}
+    hostname: schema-registry
+    depends_on:
+      - kafka-broker-1
+      - kafka-broker-2
+      - kafka-broker-3
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
+      SCHEMA_REGISTRY_LISTENERS: http://schema-registry:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-broker-2:9092,LISTENER_LOCAL://localhost:29092
+      SCHEMA_REGISTRY_DEBUG: 'true'
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+  kafka-broker-1:
+    image: confluentinc/cp-kafka:${KAFKA_VERSION}
+    hostname: kafka-broker-1
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-1:9092,LISTENER_LOCAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_COMPRESSION_TYPE: producer
+    volumes:
+      - "./volumes/kafka/broker-1:/var/lib/kafka/data"
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+  kafka-broker-2:
+    image: confluentinc/cp-kafka:${KAFKA_VERSION}
+    hostname: kafka-broker-2
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-2:9092,LISTENER_LOCAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_COMPRESSION_TYPE: producer
+    volumes:
+      - "./volumes/kafka/broker-2:/var/lib/kafka/data"
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+  kafka-broker-3:
+    image: confluentinc/cp-kafka:${KAFKA_VERSION}
+    hostname: kafka-broker-3
+    ports:
+      - "39092:39092"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-3:9092,LISTENER_LOCAL://localhost:39092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_COMPRESSION_TYPE: producer
+    volumes:
+      - "./volumes/kafka/broker-3:/var/lib/kafka/data"
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
   core-parameter-service:
     container_name: core-parameter-service
     image: serfanrud/${RELEASE_PARAMETER}
@@ -76,10 +148,85 @@ services:
       PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
     ports:
-      - 8080:8080
+      - 8080:8084
     depends_on:
       - db
       - redis
       - redis-slave
     networks:
       - ${GLOBAL_NETWORK:-wallet}
+
+  core-audit-service:
+    container_name: core-audit-service
+    image: serfanrud/${RELEASE_AUDIT}
+    hostname: core-audit-service
+    environment:
+      BOOTSTRAP-SERVER: ${KAFKA-BOOSTRAP-SERVER}
+      SCHEMA-REGISTRY-URL: ${KAFKA-SCHEMA-REGISTRY-URL}
+      COMPRESSION-TYPE: ${KAFKA-COMPRESSION-TYPE}
+      PRODUCER-ACKS: ${KAFKA-PRODUCER-ACKS}
+      LIST-TOPICS: ${KAFKA-LIST-TOPICS}
+    ports:
+      - 8080:8085
+    depends_on:
+      - kafka-broker-1
+      - kafka-broker-2
+      - kafka-broker-3
+      - db
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  core-user-service:
+    container_name: core-user-service
+    image: serfanru/${RELEASE_USER}
+    hostname: core-user-service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - 8080:8086
+    depends_on:
+      - redis
+      - redis-slave
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  core-user-management-service:
+    container_name: core-user-management-service
+    image: serfanru/${RELEASE_USER_MGMT}
+    hostname: core-user-management-service
+    environment:
+      DB_HOST: ${DB_HOST_USER_MGMT}
+      DB_PORT: ${DB_PORT_USER_MGMT}
+      DB_USERNAME: ${DB_USER_USER_MGMT}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME_USER_MGMT}
+      DB_DDL: update
+      PORT: 8080
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - 8080:8087
+    depends_on:
+      - db
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
+  core-wallet-service:
+    container_name: core-wallet-service
+    image: serfanru/${RELEASE_WALLET}
+    hostname: core-wallet-service
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USER_WALLET}
+      DB_PASSWORD: ${DB_PASSWORD_WALLET}
+      DB_NAME: ${DB_NAME_WALLET}
+      DB_DDL: update
+      PORT: 8080
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - 8080:8088
+    networks:
+      - ${GLOBAL_NETWORK:-wallet}
+
