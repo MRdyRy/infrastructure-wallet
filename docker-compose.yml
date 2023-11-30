@@ -147,6 +147,10 @@ services:
       DB_DDL: update
       PORT: 8080
       SPRING_PROFILES_ACTIVE: docker
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PORT: 6379
+      APP_NAME: core-parameter-service
     ports:
       - 8080:8084
     depends_on:
